@@ -1,4 +1,4 @@
-arduino
+Arduino
 =======
 
-Various Arduino sketches.
+Contains Arduino sketches for various projects.

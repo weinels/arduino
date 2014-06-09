@@ -16,6 +16,7 @@
 int run_duration = min_to_sec(30);
 
 time_t start_time = -1;
+time_t uptime = -1;
 
 // class to handle the zone realys
 Zone_Controller zones;
@@ -78,6 +79,13 @@ void setup()
   
   // enable the watchdog
   wdt_enable(WDTO_8S);
+  
+  // wait for the time to be retrieved
+  while (timeStatus() != timeSet)
+    wdt_reset();
+    
+  // store the time the board was powered on
+  uptime = now();
 }
 
 void loop()
@@ -102,7 +110,7 @@ void check_for_client()
   // listen for incoming clients
   EthernetClient client = server.available();
   if (client) {
-    Serial.println("new client");
+    //Serial.println("new client");
     String line = "";
     int zone = -1;
     
@@ -142,6 +150,16 @@ void check_for_client()
           client.write("<h1>Current time: ");
           char buffer[20];
           sprintf(buffer, "%02d:%02d:%02d %02d-%02d-%04d", hour(t), minute(t), second(t), month(t), day(t), year(t)); 
+          client.print(buffer);
+          client.write("</h1>\n");
+          
+          time_t up = t - uptime;
+          client.write("<h1>Up time: ");
+          int days = elapsedDays(up);
+          int hours = numberOfHours(up);
+          int minutes = numberOfMinutes(up);
+          int seconds = numberOfSeconds(up);
+          sprintf(buffer, "%03dd %02dh %02dm %02ds", days, hours, minutes, seconds); 
           client.print(buffer);
           client.write("</h1>\n");
 
@@ -204,13 +222,13 @@ void check_for_client()
           if (pos != -1)
           {
              String snum = line.substring(pos+11,pos+12);
-             Serial.print("Zone picked: ");
+             //Serial.print("Zone picked: ");
              zone = snum.toInt();
-             Serial.println(zone);
+             //Serial.println(zone);
           }
           
           currentLineIsBlank = true;
-          Serial.print(line);
+          //Serial.print(line);
           line = "";
         } 
         else if (c != '\r') {
@@ -223,7 +241,7 @@ void check_for_client()
     delay(10);
     // close the connection:
     client.stop();
-    Serial.println("client disonnected");
+    //Serial.println("client disonnected");
   }
 }
 

@@ -9,75 +9,60 @@
 #include <SPI.h>
 #include <Ethernet.h>
 
-const int zone1 = 8;
-const int zone2 = 7;
-const int zone3 = 6;
-const int zone4 = 5;
+const int zones[] = {8,7,6,5};
+const int zones_count = 4;
+
+// gets the pin of the selected zone.
+// returns -1 if an invalid zone was passed
+int zone_to_pin(int zone)
+{
+ // see if the zone is a valid one
+ if (zone < 1 || zone > zones_count)
+   return -1;
+   
+ return zones[zone-1];
+}
 
 // LOW is relay off
+// turns all zones off
 void stop_all_zones()
 {
-  digitalWrite(zone1,HIGH);
-  digitalWrite(zone2,HIGH);
-  digitalWrite(zone3,HIGH);
-  digitalWrite(zone4,HIGH);
+  // turn all the relays off
+  for (int i = 0; i < zones_count; i++)
+    digitalWrite(zones[i], HIGH);
+}
+
+// determines if the passed zone is on or off
+bool is_zone_on(int zone)
+{
+  int pin = zone_to_pin(zone);
+  if (pin < 0)
+    return false;
+    
+  return digitalRead(pin) == LOW;
 }
 
 // HIGH is relay on
 void start_zone(int zone)
 {
-  // close all the relays
-  stop_all_zones();
+  // if the selected zone is already on,
+  // nothing to do
+  if (is_zone_on(zone))
+    return;
   
-  // give the relay a bit to close
+  // get the pin of the zone
+  int pin = zone_to_pin(zone);
+  if (pin < 0)
+    return;
+    
+  // make sure all the relays are off
+  stop_all_zones();
   delay(100);
   
-  // turn on the right relay
-  switch (zone)
- {
-    case 1:
-      digitalWrite(zone1, LOW);
-      break;
-    case 2:
-      digitalWrite(zone2, LOW);
-      break;
-    case 3:
-      digitalWrite(zone3, LOW);
-      break;
-    case 4:
-      digitalWrite(zone4, LOW);
-      break;
-    default:
-      // ignore any other values passed
-      return;
- } 
- 
- delay(100);
+  // turn on the zone
+  digitalWrite(pin, LOW);
 }
  
-bool is_zone_on(int zone)
-{
-  // read the relay
-  switch (zone)
- {
-    case 1:
-      return digitalRead(zone1) == LOW;
-      break;
-    case 2:
-      return digitalRead(zone2) == LOW;
-      break;
-    case 3:
-      return digitalRead(zone3) == LOW;
-      break;
-    case 4:
-      return digitalRead(zone4) == LOW;
-      break;
-    default:
-      // ignore any other will be considered off
-      return false;
- }
-}
-
 // Enter a MAC address for your controller below.
 // Newer Ethernet shields have a MAC address printed on a sticker on the shield
 byte mac[]     = {0x90, 0xA2, 0xDA, 0x0D, 0x23, 0x81 };
@@ -95,10 +80,8 @@ EthernetServer server(80);
 void setup() 
 { 
   // set the pins for the relay
-  pinMode(zone1,OUTPUT);
-  pinMode(zone2,OUTPUT);
-  pinMode(zone3,OUTPUT);
-  pinMode(zone4,OUTPUT);
+  for (int i = 0; i < zones_count; i++)
+    pinMode(zones[i],OUTPUT);
   
   // make sure all the relays are off
   stop_all_zones();
@@ -142,6 +125,10 @@ void loop()
           {
             start_zone(zone); 
           }
+          else if (zone == 0)
+          {
+            stop_all_zones();
+          }
           // send a standard http response header
           client.println("HTTP/1.1 200 OK");
           client.println("Content-Type: text/html");
@@ -172,7 +159,7 @@ void loop()
           }
           
           client.println("<form method='GET'>");
-          client.print("<input type='hidden' name='zone' value='5'/>");
+          client.print("<input type='hidden' name='zone' value='0'/>");
           client.print("<input type='submit' value='Turn All Zones Off' style='width: 100%; height: 175px;'/>");
           client.println("</form><br/>");
           

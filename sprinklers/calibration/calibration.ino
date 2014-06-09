@@ -148,7 +148,7 @@ void check_for_client()
           for (int i = 1; i <= zones.count(); i++)
           {
             client.write("<h1> Zone ");
-            client.write(i);
+            client.print(i);
             client.write(" is ");
             if (zones.is_on(i))
             {

@@ -5,6 +5,7 @@
 #include <Ethernet.h>
 #include <EthernetUdp.h>
 #include <Time.h>
+#include <avr/wdt.h>
 #include "zones.h"
 
 // The zones are defined in setup()
@@ -47,6 +48,10 @@ EthernetServer server(80);
 
 void setup() 
 { 
+  // disable the SD card
+  pinMode(4, OUTPUT);
+  digitalWrite(4, HIGH);
+  
   // create the zones here
   zones.add(8); // zone 1
   zones.add(7); // zone 2
@@ -70,10 +75,16 @@ void setup()
   Udp.begin(localUDPPort);
   setSyncProvider(updateTime);
   setSyncInterval(timeUpdateInterval);
+  
+  // enable the watchdog
+  wdt_enable(WDTO_8S);
 }
 
 void loop()
 {
+  // tell the watchdog we're still alive
+  wdt_reset();
+  
   // handle any ethernet stuff we have to
   check_for_client();
   
@@ -121,81 +132,66 @@ void check_for_client()
             start_time = -1;
           }
           // send a standard http response header
-          client.println("HTTP/1.1 200 OK");
-          client.println("Content-Type: text/html");
-          client.println("Connection: close");  // the connection will be closed after completion of the response
-          client.println();
-          client.println("<!DOCTYPE HTML>");
-          client.println("<html><head><title>Calibrate Sprinklers</title></head><body>");
+          client.write("HTTP/1.1 200 OK\n");
+          client.write("Content-Type: text/html\n");
+          client.write("Connection: close\n\n");  // the connection will be closed after completion of the response
+          client.write("<!DOCTYPE HTML>\n");
+          client.write("<html><head><title>Calibrate Sprinklers</title></head><body>");
           
           time_t t = now();
-          client.print("<h1>Current time: ");
-          client.print(hour(t));
-          client.print(":");
-          if (minute(t) < 10)
-            client.print("0");
-          client.print(minute(t));
-          client.print(":");
-          if (second(t) < 10)
-            client.print("0");
-          client.print(second(t));
-          client.print(" ");
-          client.print(month(t));
-          client.print("-");
-          client.print(day(t));
-          client.print("-");
-          client.print(year(t)); 
-          client.println("</h1>");
+          client.write("<h1>Current time: ");
+          char buffer[20];
+          sprintf(buffer, "%02d:%02d:%02d %02d-%02d-%04d", hour(t), minute(t), second(t), month(t), day(t), year(t)); 
+          client.print(buffer);
+          client.write("</h1>\n");
 
           for (int i = 1; i <= zones.count(); i++)
           {
-            client.print("<h1> Zone ");
-            client.print(i);
-            client.print(" is ");
+            client.write("<h1> Zone ");
+            client.write(i);
+            client.write(" is ");
             if (zones.is_on(i))
             {
-               client.print("on");
+               client.write("on");
             }
             else
             {
-               client.print("off");
+               client.write("off");
             }
-            client.println("</h1>");   
+            client.write("</h1>");   
 
-            client.println("<form method='GET'>");
-            client.print("<input type='hidden' name='zone' value='");
+            client.write("<form method='GET'>");
+            client.write("<input type='hidden' name='zone' value='");
             client.print(i);
-            client.println("'/>");
-            client.print("<input type='submit' value='");
+            client.write("'/>");
+            client.write("<input type='submit' value='");
             if (zones.is_on(i) && start_time > 0)
             {
-              client.print("Left ");
+              client.write("Left ");
               time_t left = run_duration - (now() - start_time);
-              client.print(hour(left));
-              client.print(":");
-              client.print(minute(left));
-              client.print(":");
-              client.print(second(left));
-              client.print("' disabled id='zone_timer'");
+              char buffer[9];
+              sprintf(buffer, "%02d:%02d:%02d", hour(left), minute(left), second(left)); 
+              client.print(buffer);
+              client.write("' disabled id='zone_timer'");
             }
             else
             {
-              client.print("Turn On'");
+              client.write("Turn On'");
             }
-            client.print(" style='width: 100%; height: 175px; font-size: 300%'/>");
-            client.println("</form><br/>");
+            client.write(" style='width: 100%; height: 175px; font-size: 300%'/>");
+            client.write("</form><br/>");
           }
           
-          client.println("<hr><form method='GET'>");
-          client.print("<input type='hidden' name='zone' value='0'/>");
-          client.print("<input type='submit' value='Turn All Off' style='width: 100%; height: 175px; font-size: 300%'/>");
-          client.println("</form><br/>");
+          client.write("<hr><form method='GET'>");
+          client.write("<input type='hidden' name='zone' value='0'/>");
+          client.write("<input type='submit' value='Turn All Off' style='width: 100%; height: 175px; font-size: 300%'/>");
+          client.write("</form><br/>");
           
-          client.println("<form method='GET'>");
-          client.print("<input type='submit' value='Refresh' style='width: 100%; height: 175px; font-size: 300%'/>");
-          client.println("</form><br/>");
+          client.write("<form method='GET'>");
+          client.write("<input type='submit' value='Refresh' style='width: 100%; height: 175px; font-size: 300%'/>");
+          client.write("</form><br/>");
           
-          client.println("</body></html>");
+          client.write("</body></html>");
           break;
         }
         if (c == '\n') {
@@ -232,7 +228,7 @@ void check_for_client()
 }
 
 // converts minutes to milliseconds
-unsigned long min_to_sec( int m )
+unsigned long min_to_sec(int m)
 {
   return m * 60;
 }

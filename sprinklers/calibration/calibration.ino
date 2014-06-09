@@ -51,7 +51,7 @@ void setup()
   zones.add(8); // zone 1
   zones.add(7); // zone 2
   zones.add(6); // zone 3
-  zones.add(5); // zone 4
+  //zones.add(5); // zone 4
   
   // Open serial communications and wait for port to open:
   Serial.begin(9600);
@@ -109,7 +109,7 @@ void check_for_client()
           // turn zones on/off if needed
           if (zone > 0)
           {
-            if (zones.valid(zone))
+            if (zones.valid(zone) && !zones.is_on(zone))
             {
               zones.turn_on(zone); 
               start_time = now();
@@ -126,7 +126,7 @@ void check_for_client()
           client.println("Connection: close");  // the connection will be closed after completion of the response
           client.println();
           client.println("<!DOCTYPE HTML>");
-          client.println("<html><head><title>Calibrate Sprinklers</title><body>");
+          client.println("<html><head><title>Calibrate Sprinklers</title></head><body>");
           
           time_t t = now();
           client.print("<h1>Current time: ");
@@ -147,30 +147,52 @@ void check_for_client()
           client.print(year(t)); 
           client.println("</h1>");
 
-          for (int i = 1; i <= 4; i++)
+          for (int i = 1; i <= zones.count(); i++)
           {
             client.print("<h1> Zone ");
             client.print(i);
             client.print(" is ");
             if (zones.is_on(i))
+            {
                client.print("on");
+            }
             else
+            {
                client.print("off");
+            }
             client.println("</h1>");   
 
             client.println("<form method='GET'>");
             client.print("<input type='hidden' name='zone' value='");
             client.print(i);
             client.println("'/>");
-            client.print("<input type='submit' value='Turn Zone ");
-            client.print(i);
-            client.println(" On' style='width: 100%; height: 175px;'/>");
+            client.print("<input type='submit' value='");
+            if (zones.is_on(i) && start_time > 0)
+            {
+              client.print("Left ");
+              time_t left = run_duration - (now() - start_time);
+              client.print(hour(left));
+              client.print(":");
+              client.print(minute(left));
+              client.print(":");
+              client.print(second(left));
+              client.print("' disabled id='zone_timer'");
+            }
+            else
+            {
+              client.print("Turn On'");
+            }
+            client.print(" style='width: 100%; height: 175px; font-size: 300%'/>");
             client.println("</form><br/>");
           }
           
-          client.println("<form method='GET'>");
+          client.println("<hr><form method='GET'>");
           client.print("<input type='hidden' name='zone' value='0'/>");
-          client.print("<input type='submit' value='Turn All Zones Off' style='width: 100%; height: 175px;'/>");
+          client.print("<input type='submit' value='Turn All Off' style='width: 100%; height: 175px; font-size: 300%'/>");
+          client.println("</form><br/>");
+          
+          client.println("<form method='GET'>");
+          client.print("<input type='submit' value='Refresh' style='width: 100%; height: 175px; font-size: 300%'/>");
           client.println("</form><br/>");
           
           client.println("</body></html>");

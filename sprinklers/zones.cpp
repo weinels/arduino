@@ -100,7 +100,7 @@ void Zone_Controller::turn_on(int zone)
     
   // make sure all the relays are off
   turn_all_off();
-  delay(100);
+  delay(25);
   
   // turn on the zone
   digitalWrite(pin(zone), LOW);
@@ -115,7 +115,6 @@ void Zone_Controller::turn_off(int zone)
 // turns all zones off
 void Zone_Controller::turn_all_off()
 {
-  // LOW is relay off
   // turn all the relays off
   for (int i = 0; i < _count; i++)
     digitalWrite(_pins[i], HIGH);

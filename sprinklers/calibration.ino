@@ -5,6 +5,7 @@
 #include <Ethernet.h>
 #include <EthernetUdp.h>
 #include <Time.h>
+#include <TimeAlarms.h>
 #include <avr/wdt.h>
 #include "zones.h"
 
@@ -15,8 +16,8 @@
 // (and makes a lazy way to water. >_>)
 int run_duration = min_to_sec(30);
 
-time_t start_time = -1;
-time_t uptime = -1;
+time_t start_time = 0;
+time_t uptime = 0;
 
 // class to handle the zone realys
 Zone_Controller zones;
@@ -78,7 +79,7 @@ void setup()
   setSyncInterval(timeUpdateInterval);
   
   // enable the watchdog
-  wdt_enable(WDTO_8S);
+  wdt_enable(WDTO_4S);
   
   // wait for the time to be retrieved
   while (timeStatus() != timeSet)
@@ -86,12 +87,28 @@ void setup()
     
   // store the time the board was powered on
   uptime = now();
+  
+  // lets try resetting the board at regular intervals to see this fixes the problem
+  //Alarm.timerRepeat(min_to_sec(10), resetBoard);
+}
+
+void resetBoard()
+{
+  if (start_time > 0)
+    return;
+    
+  while (true)
+  {
+   ;
+  } 
 }
 
 void loop()
 {
   // tell the watchdog we're still alive
   wdt_reset();
+ 
+  Alarm.delay(0);
   
   // handle any ethernet stuff we have to
   check_for_client();
@@ -125,19 +142,17 @@ void check_for_client()
         // character) and the line is blank, the http request has ended,
         // so you can send a reply
         if (c == '\n' && currentLineIsBlank) {
+          client.flush();
           // turn zones on/off if needed
           if (zone > 0)
           {
-            if (zones.valid(zone) && !zones.is_on(zone))
-            {
               zones.turn_on(zone); 
               start_time = now();
-            }
           }
           else if (zone == 0)
           {
             zones.turn_all_off();
-            start_time = -1;
+            start_time = 0;
           }
           // send a standard http response header
           client.write("HTTP/1.1 200 OK\n");
@@ -183,7 +198,7 @@ void check_for_client()
             client.print(i);
             client.write("'/>");
             client.write("<input type='submit' value='");
-            if (zones.is_on(i) && start_time > 0)
+            if ((start_time > 0) && (zones.is_on(i)))
             {
               client.write("Left ");
               time_t left = run_duration - (now() - start_time);
@@ -238,8 +253,9 @@ void check_for_client()
       }
     }
     // give the web browser time to receive the data
-    delay(10);
+    delay(1);
     // close the connection:
+    client.flush();
     client.stop();
     //Serial.println("client disonnected");
   }
@@ -277,7 +293,7 @@ unsigned long sendNTPpacket(IPAddress& address)
 
 unsigned long updateTime()
 {
-  Serial.println("Retrieving NTP time");
+  //Serial.println("Retrieving NTP time");
   sendNTPpacket(timeServer); // send an NTP packet to a time server
 
     // wait to see if a reply is available

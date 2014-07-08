@@ -62,6 +62,7 @@ void setup()
   {
     ; // wait for serial port to connect. Needed for Leonardo only
   }
+  Serial.println("Starting up.");
   
   // create the zones here
   // the order they are added is the order they will be watered
@@ -253,7 +254,7 @@ unsigned long sendNTPpacket(IPAddress& address)
 
 unsigned long updateTime()
 {
-  Serial.println("Retrieving NTP time");
+  Serial.println("Retrieving NTP time.");
   sendNTPpacket(timeServer); // send an NTP packet to a time server
 
     // wait to see if a reply is available

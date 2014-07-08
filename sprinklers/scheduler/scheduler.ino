@@ -1,26 +1,32 @@
 // Author: Adam Wilson
-// this sketch is to give remote control to the sprinklers
-// to aid in calibrate the physical sprinklers.
-#include <SPI.h>         
+// this sketch is to schedule automatic lawn waterings
+#include <SPI.h>   
 #include <Ethernet.h>
 #include <EthernetUdp.h>
 #include <Time.h>
 #include <TimeAlarms.h>
 #include <avr/wdt.h>
 #include "zones.h"
+#include <EEPROM.h>
+#include "EEPROMAnything.h"
 
 // The zones are defined in setup()
 
-// the maximum run length of each zone
-// this is to keep a zone from running forever
-// (and makes a lazy way to water. >_>)
-int run_duration = min_to_sec(30);
+// Holds the details of when to water
+struct water_schedule
+{
+  int hour;
+  int min;
+  int period;
+  time_t last;
+} schedule;
 
-time_t start_time = 0;
+// track the uptime
 time_t uptime = 0;
 
 // class to handle the zone realys
-Zone_Controller zones;
+// my yard has three zones
+Zone_Controller zones(3);
 
 const time_t timeUpdateInterval = SECS_PER_DAY; // Update the time every day.
 const int timeZone = -6; // The hour offest from GMT. i.e. MST is a -6 offset.
@@ -43,22 +49,12 @@ byte packetBuffer[ NTP_PACKET_SIZE]; //buffer to hold incoming and outgoing pack
 // A UDP instance to let us send and receive packets over UDP
 EthernetUDP Udp;
 
-// Initialize the Ethernet server library
-// with the IP address and port you want to use 
-// (port 80 is default for HTTP):
-EthernetServer server(80);
-
+int zone_to_water;
 void setup() 
 { 
   // disable the SD card
   pinMode(4, OUTPUT);
   digitalWrite(4, HIGH);
-  
-  // create the zones here
-  zones.add(8); // zone 1
-  zones.add(7); // zone 2
-  zones.add(6); // zone 3
-  //zones.add(5); // zone 4
   
   // Open serial communications and wait for port to open:
   Serial.begin(9600);
@@ -66,41 +62,73 @@ void setup()
   {
     ; // wait for serial port to connect. Needed for Leonardo only
   }
-   
-  // start the Ethernet connection and the server:
-  Ethernet.begin(mac, ip);
-  server.begin();
-  Serial.print("Server is at ");
-  Serial.println(Ethernet.localIP());
   
+  // create the zones here
+  // the order they are added is the order they will be watered
+  zones.add(7, 60); // frontyard
+  zones.add(6, 60); // side strip
+  zones.add(8, 30); // backyard
+  
+  // set when to water
+  schedule.hour = 5;
+  schedule.min = 0;
+  schedule.period = 2; // everyother day
+  
+//  for(int i = 0; i < zones.count(); ++i)
+//  {
+//    Serial.print("Zone ");
+//    Serial.print(i+1);
+//    Serial.print(": pin ");
+//    Serial.print(zones.pin(i));
+//    Serial.print(" and time ");
+//    Serial.println(zones.time(i));
+//  }
+ 
   // start UDP
+  Ethernet.begin(mac,ip);
   Udp.begin(localUDPPort);
   setSyncProvider(updateTime);
   setSyncInterval(timeUpdateInterval);
-  
+   
   // enable the watchdog
   wdt_enable(WDTO_4S);
   
   // wait for the time to be retrieved
   while (timeStatus() != timeSet)
     wdt_reset();
-    
+  Serial.print("Current time is: ");
+  print_time(now());
+  Serial.print("\n");
+ 
   // store the time the board was powered on
   uptime = now();
   
-  // lets try resetting the board at regular intervals to see this fixes the problem
-  //Alarm.timerRepeat(min_to_sec(10), resetBoard);
-}
-
-void resetBoard()
-{
-  if (start_time > 0)
-    return;
-    
-  while (true)
-  {
-   ;
-  } 
+  // use to reset the last day watered
+//  time_t t = 42;
+//  EEPROM_writeAnything(0,t);
+  
+  // get the last time watered
+  EEPROM_readAnything(0,schedule.last);
+  
+  // make sure we water as soon as possible, used for testing
+//  schedule.last = 0;
+//  time_t t = now() + SECS_PER_MIN;
+//  schedule.hour = hour(t);
+//  schedule.min = minute(t);
+  
+  Serial.print("Last watered on ");
+  print_time(schedule.last);
+  Serial.print("\n");
+  
+  // print the time of the next watering
+  Serial.print("Next watering is at: ");
+  print_time(next_watering());
+  Serial.print("\n");
+  
+  // setup the alarm to see if we water today
+  Alarm.alarmRepeat(schedule.hour, schedule.min, 0, check_if_we_water);
+  
+  Serial.println("Beginning operation.");
 }
 
 void loop()
@@ -109,156 +137,88 @@ void loop()
   wdt_reset();
  
   Alarm.delay(0);
-  
-  // handle any ethernet stuff we have to
-  check_for_client();
-  
-  // check to see if we need 
-  if (start_time > 0)
-  {
-     if (now() - start_time >= run_duration)
-        zones.turn_all_off(); 
-  }
 }
 
-// handles any ethernet clients
-void check_for_client()
+void check_if_we_water()
 {
-  // listen for incoming clients
-  EthernetClient client = server.available();
-  if (client) {
-    //Serial.println("new client");
-    String line = "";
-    int zone = -1;
+   if (next_watering() <= now())
+   {
+     zone_to_water = 0;
+     int offset = 0;
+     time_t t = 1;
+     // time to start watering
+     for(int i = 0; i < zones.count(); ++i)
+     {
+       Alarm.timerOnce(numberOfHours(t), numberOfMinutes(t), numberOfSeconds(t), water_zone);
+       t += zones.time(i) * SECS_PER_MIN;
+     }
+     Alarm.timerOnce(numberOfHours(t), numberOfMinutes(t), numberOfSeconds(t), stop_watering);
+     
+     Serial.print("Started watering at: ");
+     print_time(now());
+     Serial.print("\n");
+     
+     Serial.print("Finish watering in ");
+     Serial.print(numberOfHours(t));
+     Serial.print(" hours ");
+     Serial.print(numberOfMinutes(t));
+     Serial.print(" minutes ");
+     Serial.print(numberOfSeconds(t));
+     Serial.println(" seconds.");
+   }
+}
+
+void water_zone()
+{
+  // only water valid zones
+  if (!zones.valid(zone_to_water))
+    return;
     
-    // an http request ends with a blank line
-    boolean currentLineIsBlank = true;
-    while (client.connected()) {
-      if (client.available()) {
-        char c = client.read();
-        line += String(c);
-        
-        // if you've gotten to the end of the line (received a newline
-        // character) and the line is blank, the http request has ended,
-        // so you can send a reply
-        if (c == '\n' && currentLineIsBlank) {
-          client.flush();
-          // turn zones on/off if needed
-          if (zone > 0)
-          {
-              zones.turn_on(zone); 
-              start_time = now();
-          }
-          else if (zone == 0)
-          {
-            zones.turn_all_off();
-            start_time = 0;
-          }
-          // send a standard http response header
-          client.write("HTTP/1.1 200 OK\n");
-          client.write("Content-Type: text/html\n");
-          client.write("Connection: close\n\n");  // the connection will be closed after completion of the response
-          client.write("<!DOCTYPE HTML>\n");
-          client.write("<html><head><title>Calibrate Sprinklers</title></head><body>");
-          
-          time_t t = now();
-          client.write("<h1>Current time: ");
-          char buffer[20];
-          sprintf(buffer, "%02d:%02d:%02d %02d-%02d-%04d", hour(t), minute(t), second(t), month(t), day(t), year(t)); 
-          client.print(buffer);
-          client.write("</h1>\n");
-          
-          time_t up = t - uptime;
-          client.write("<h1>Up time: ");
-          int days = elapsedDays(up);
-          int hours = numberOfHours(up);
-          int minutes = numberOfMinutes(up);
-          int seconds = numberOfSeconds(up);
-          sprintf(buffer, "%03dd %02dh %02dm %02ds", days, hours, minutes, seconds); 
-          client.print(buffer);
-          client.write("</h1>\n");
+  Serial.print("Zone ");
+  Serial.print(zone_to_water);
+  Serial.print(" started at ");
+  print_time(now());
+  Serial.println();
+  
+  zones.turn_on(zone_to_water++);
+}
 
-          for (int i = 1; i <= zones.count(); i++)
-          {
-            client.write("<h1> Zone ");
-            client.print(i);
-            client.write(" is ");
-            if (zones.is_on(i))
-            {
-               client.write("on");
-            }
-            else
-            {
-               client.write("off");
-            }
-            client.write("</h1>");   
+void stop_watering()
+{
+  // stop the zones
+  zones.turn_all_off();
+  
+  // updated the last watered time
+  schedule.last = now();
+  EEPROM_writeAnything(0,schedule.last);
+  
+  Serial.print("Last watered on ");
+  print_time(schedule.last);
+  Serial.print("\nNext watering is at: ");
+  print_time(next_watering());
+  Serial.print("\n");
+}
 
-            client.write("<form method='GET'>");
-            client.write("<input type='hidden' name='zone' value='");
-            client.print(i);
-            client.write("'/>");
-            client.write("<input type='submit' value='");
-            if ((start_time > 0) && (zones.is_on(i)))
-            {
-              client.write("Left ");
-              time_t left = run_duration - (now() - start_time);
-              char buffer[9];
-              sprintf(buffer, "%02d:%02d:%02d", hour(left), minute(left), second(left)); 
-              client.print(buffer);
-              client.write("' disabled id='zone_timer'");
-            }
-            else
-            {
-              client.write("Turn On'");
-            }
-            client.write(" style='width: 100%; height: 175px; font-size: 300%'/>");
-            client.write("</form><br/>");
-          }
-          
-          client.write("<hr><form method='GET'>");
-          client.write("<input type='hidden' name='zone' value='0'/>");
-          client.write("<input type='submit' value='Turn All Off' style='width: 100%; height: 175px; font-size: 300%'/>");
-          client.write("</form><br/>");
-          
-          client.write("<form method='GET'>");
-          client.write("<input type='submit' value='Refresh' style='width: 100%; height: 175px; font-size: 300%'/>");
-          client.write("</form><br/>");
-          
-          client.write("</body></html>");
-          break;
-        }
-        if (c == '\n') {
-          // you're starting a new line
-          
-          
-          line.toLowerCase();
-          // see if this line contains the GET
-          int pos = line.indexOf("get /?zone=");
-          if (pos != -1)
-          {
-             String snum = line.substring(pos+11,pos+12);
-             //Serial.print("Zone picked: ");
-             zone = snum.toInt();
-             //Serial.println(zone);
-          }
-          
-          currentLineIsBlank = true;
-          //Serial.print(line);
-          line = "";
-        } 
-        else if (c != '\r') {
-          // you've gotten a character on the current line
-          currentLineIsBlank = false;
-        }
-      }
-    }
-    // give the web browser time to receive the data
-    delay(1);
-    // close the connection:
-    client.flush();
-    client.stop();
-    //Serial.println("client disonnected");
+time_t next_watering()
+{
+  time_t next = (elapsedDays(schedule.last)+schedule.period)*SECS_PER_DAY + schedule.hour*SECS_PER_HOUR + schedule.min*SECS_PER_MIN;
+  if (next < now())
+  {
+    // find the next avaliable watering time
+    int i = 0;
+    do
+    {
+      next = (elapsedDays(now())+i++)*SECS_PER_DAY + schedule.hour*SECS_PER_HOUR + schedule.min*SECS_PER_MIN;
+    } while(next < now());  
   }
+  return next;
+}
+
+void print_time(time_t t)
+{
+  char buffer[20];
+  sprintf(buffer, "%02d:%02d:%02d %02d-%02d-%04d", hour(t), minute(t), second(t), month(t), day(t), year(t)); 
+  Serial.print(buffer);
 }
 
 // converts minutes to milliseconds
@@ -293,7 +253,7 @@ unsigned long sendNTPpacket(IPAddress& address)
 
 unsigned long updateTime()
 {
-  //Serial.println("Retrieving NTP time");
+  Serial.println("Retrieving NTP time");
   sendNTPpacket(timeServer); // send an NTP packet to a time server
 
     // wait to see if a reply is available

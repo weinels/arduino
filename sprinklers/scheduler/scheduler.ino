@@ -33,10 +33,12 @@ const int timeZone = -6; // The hour offest from GMT. i.e. MST is a -6 offset.
 
 // Enter a MAC address for your controller below.
 // Newer Ethernet shields have a MAC address printed on a sticker on the shield
-byte mac[]     = {0x90, 0xA2, 0xDA, 0x0D, 0x23, 0x81 };
-byte ip[]      = {192, 168, 1, 69 };
+byte mac[]     = {0x90, 0xA2, 0xDA, 0x0D, 0x23, 0x81};
+byte ip[]      = {192, 168, 1, 69};
 //byte gateway[] = {192, 168, 1, 1};
 //byte subnet[]  = {255, 255, 255, 0};
+
+byte server[]  = {192, 168, 1, 42}; // ip to send status updates to
 
 unsigned int localUDPPort = 8888;      // local port to listen for UDP packets
 
@@ -49,9 +51,15 @@ byte packetBuffer[ NTP_PACKET_SIZE]; //buffer to hold incoming and outgoing pack
 // A UDP instance to let us send and receive packets over UDP
 EthernetUDP Udp;
 
+EthernetClient client;
+
 int zone_to_water;
 void setup() 
 { 
+  // enable the watchdog
+  wdt_enable(WDTO_4S);
+  wdt_reset();
+  
   // disable the SD card
   pinMode(4, OUTPUT);
   digitalWrite(4, HIGH);
@@ -68,7 +76,7 @@ void setup()
   // the order they are added is the order they will be watered
   zones.add(7, 60); // frontyard
   zones.add(6, 60); // side strip
-  zones.add(8, 30); // backyard
+  zones.add(8, 20); // backyard
   
   // set when to water
   schedule.hour = 5;
@@ -90,13 +98,15 @@ void setup()
   Udp.begin(localUDPPort);
   setSyncProvider(updateTime);
   setSyncInterval(timeUpdateInterval);
-   
-  // enable the watchdog
-  wdt_enable(WDTO_4S);
   
   // wait for the time to be retrieved
   while (timeStatus() != timeSet)
-    wdt_reset();
+  { 
+    ; // if it takes longer than 4 seconds to get the time, then the ethernet shield has fucked up.
+  }
+  
+  wdt_reset();
+  
   Serial.print("Current time is: ");
   print_time(now());
   Serial.print("\n");
@@ -129,7 +139,14 @@ void setup()
   // setup the alarm to see if we water today
   Alarm.alarmRepeat(schedule.hour, schedule.min, 0, check_if_we_water);
   
-  Serial.println("Beginning operation.");
+  int size = 50;
+  char buffer[size];
+  snprintf(buffer, size, "Device%%20beginning%%20operation.");
+  send_status(buffer);
+  
+  time_t next = next_watering();
+  snprintf(buffer, size, "Next%%20watering:%%20%02d:%02d:%02d%%20%02d-%02d-%04d.", hour(next), minute(next), second(next), month(next), day(next), year(next));
+  send_status(buffer);
 }
 
 void loop()
@@ -146,26 +163,24 @@ void check_if_we_water()
    {
      zone_to_water = 0;
      int offset = 0;
-     time_t t = 1;
+     time_t total = 5; // start watering in one second, that we're sure the timers will trigger
      // time to start watering
      for(int i = 0; i < zones.count(); ++i)
      {
-       Alarm.timerOnce(numberOfHours(t), numberOfMinutes(t), numberOfSeconds(t), water_zone);
-       t += zones.time(i) * SECS_PER_MIN;
+       Alarm.timerOnce(numberOfHours(total), numberOfMinutes(total), numberOfSeconds(total), water_zone);
+       total += zones.time(i) * SECS_PER_MIN;
      }
-     Alarm.timerOnce(numberOfHours(t), numberOfMinutes(t), numberOfSeconds(t), stop_watering);
+     int h = numberOfHours(total);
+     int m = numberOfMinutes(total);
+     int s = numberOfSeconds(total);
+     Alarm.timerOnce(h, m, s, stop_watering);
      
-     Serial.print("Started watering at: ");
-     print_time(now());
-     Serial.print("\n");
-     
-     Serial.print("Finish watering in ");
-     Serial.print(numberOfHours(t));
-     Serial.print(" hours ");
-     Serial.print(numberOfMinutes(t));
-     Serial.print(" minutes ");
-     Serial.print(numberOfSeconds(t));
-     Serial.println(" seconds.");
+     int size = 40;
+     char buffer[size];
+     snprintf(buffer, size, "Started%%20watering.");
+     send_status(buffer);
+     snprintf(buffer, size, "Watering%%20finished%%20in%%20%dh%%20%dm.", h, m);
+     send_status(buffer);
    }
 }
 
@@ -174,14 +189,13 @@ void water_zone()
   // only water valid zones
   if (!zones.valid(zone_to_water))
     return;
-    
-  Serial.print("Zone ");
-  Serial.print(zone_to_water);
-  Serial.print(" started at ");
-  print_time(now());
-  Serial.println();
   
   zones.turn_on(zone_to_water++);
+  
+  int size = 25;
+  char buffer[size];
+  snprintf(buffer, size, "Zone%%20%d%%20started.", zone_to_water);
+  send_status(buffer);
 }
 
 void stop_watering()
@@ -193,11 +207,47 @@ void stop_watering()
   schedule.last = now();
   EEPROM_writeAnything(0,schedule.last);
   
-  Serial.print("Last watered on ");
-  print_time(schedule.last);
-  Serial.print("\nNext watering is at: ");
-  print_time(next_watering());
-  Serial.print("\n");
+  int size = 50;
+  char buffer[size];
+  snprintf(buffer, size, "Finished%%20watering.");
+  send_status(buffer);
+  
+  time_t next = next_watering();
+  snprintf(buffer, size, "Next%%20watering:%%20%02d:%02d:%02d%%20%02d-%02d-%04d.", hour(next), minute(next), second(next), month(next), day(next), year(next));
+  send_status(buffer);
+}
+
+void send_status(char* buf)
+{
+   //Serial.println(buf);
+   if (client.connect(server, 80)) 
+   {
+//     Serial.println("connected");
+    // Make a HTTP request:
+    client.print("GET /~akamu/sprinkler_status.php?m=");
+    client.print(buf);
+    client.println(" HTTP/1.1");
+    client.println("Host: www.google.com");
+    client.println("Connection: close");
+    client.println();
+    // we don't care about the response, so wait a tenth of a second and close the connection
+    delay(100);
+    client.stop();
+    }
+    
+//    while (client.available()) 
+//    {
+//    char c = client.read();
+//    Serial.print(c);
+//    }
+//
+//    // if the server's disconnected, stop the client:
+//    if (!client.connected()) 
+//    {
+//      Serial.println();
+//      Serial.println("disconnecting.");
+//      client.stop();
+//    } 
 }
 
 time_t next_watering()
@@ -218,7 +268,7 @@ time_t next_watering()
 void print_time(time_t t)
 {
   char buffer[20];
-  sprintf(buffer, "%02d:%02d:%02d %02d-%02d-%04d", hour(t), minute(t), second(t), month(t), day(t), year(t)); 
+  snprintf(buffer, 20, "%02d:%02d:%02d %02d-%02d-%04d", hour(t), minute(t), second(t), month(t), day(t), year(t)); 
   Serial.print(buffer);
 }
 
@@ -254,7 +304,7 @@ unsigned long sendNTPpacket(IPAddress& address)
 
 unsigned long updateTime()
 {
-  Serial.println("Retrieving NTP time.");
+  //Serial.println("Retrieving NTP time.");
   sendNTPpacket(timeServer); // send an NTP packet to a time server
 
     // wait to see if a reply is available

@@ -74,9 +74,9 @@ void setup()
   
   // create the zones here
   // the order they are added is the order they will be watered
-  zones.add(7, 60); // frontyard
-  zones.add(6, 20); // side strip
-  zones.add(8, 60); // backyard
+  zones.add(7, 30); // frontyard
+  zones.add(6, 15); // side strip
+  zones.add(8, 30); // backyard
   
   // set when to water
   schedule.hour = 5;
